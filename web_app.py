@@ -1,7 +1,4 @@
 # web_app.py
-import os, sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 from flask import Flask, render_template_string, request, redirect, url_for
 from league_core import (
     elo, update_elo_with_score,
@@ -15,70 +12,168 @@ HTML = """
 <html lang="ko">
 <head>
   <meta charset="utf-8">
+
   <title>FIFA ELO 리그</title>
+
+  <!-- 구글 폰트 -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      margin: 0;
+      background: #0A0A23;
+      color: white;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      font-weight: 700;
+      font-size: 38px;
+      color: #9b59ff;
+      text-shadow: 0 0 10px rgba(155, 89, 255, 0.7);
+    }
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+    }
+
+    .card {
+      background: #151537;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 25px;
+      box-shadow: 0 0 15px rgba(155, 89, 255, 0.2);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th {
+      background: #9b59ff;
+      padding: 12px;
+      text-align: left;
+      border-radius: 8px;
+    }
+
+    td {
+      padding: 10px;
+      border-bottom: 1px solid #2e2e50;
+    }
+
+    tr:hover {
+      background: rgba(155, 89, 255, 0.15);
+    }
+
+    input, select, button {
+      padding: 10px;
+      margin: 5px 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 15px;
+    }
+
+    button {
+      background: #9b59ff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: #b57dff;
+      transform: scale(1.04);
+    }
+
+    .log-box {
+      padding-left: 15px;
+    }
+  </style>
 </head>
+
 <body>
-  <h1>FIFA ELO 리그 (웹 버전)</h1>
+  <h1>⚽ FIFA ELO 리그</h1>
 
-  <h2>경기 입력</h2>
-  <form method="post" action="{{ url_for('add_match') }}">
-    선수1:
-    <select name="p1">
-      {% for name in players %}
-      <option value="{{name}}">{{name}}</option>
-      {% endfor %}
-    </select>
-    점수1: <input type="number" name="g1" style="width:50px;">
-    <br>
-    선수2:
-    <select name="p2">
-      {% for name in players %}
-      <option value="{{name}}">{{name}}</option>
-      {% endfor %}
-    </select>
-    점수2: <input type="number" name="g2" style="width:50px;">
-    <br>
-    <button type="submit">경기 기록</button>
-  </form>
+  <div class="container">
 
-  <h2>현재 순위</h2>
-  <table border="1" cellpadding="5">
-    <tr><th>순위</th><th>이름</th><th>Elo</th></tr>
-    {% for (name, rating) in ranking %}
-    <tr>
-      <td>{{ loop.index }}</td>
-      <td>{{ name }}</td>
-      <td>{{ rating|int }}</td>
-    </tr>
-    {% endfor %}
-  </table>
+    <div class="card">
+      <h2>📒 경기 입력</h2>
+      <form method="post" action="{{ url_for('add_match') }}">
+        <select name="p1">
+          {% for name in players %}
+          <option value="{{name}}">{{name}}</option>
+          {% endfor %}
+        </select>
+        <input type="number" name="g1" placeholder="점수1">
 
-  <h2>통계</h2>
-  <ul>
-    <li>총 경기 수: {{stats.total_matches}}</li>
-    <li>평균 Elo: {{stats.avg_elo}}</li>
-    <li>최고 Elo: {{stats.max_player}} ({{stats.max_rating}})</li>
-    <li>최저 Elo: {{stats.min_player}} ({{stats.min_rating}})</li>
-  </ul>
+        <br>
 
-  <h2>최근 경기 로그</h2>
-  <ul>
-    {% for rec in recent %}
-      <li>[{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} -> {{rec.result}}</li>
-    {% endfor %}
-  </ul>
+        <select name="p2">
+          {% for name in players %}
+          <option value="{{name}}">{{name}}</option>
+          {% endfor %}
+        </select>
+        <input type="number" name="g2" placeholder="점수2">
+
+        <br>
+
+        <button type="submit">경기 기록</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>🏆 현재 순위</h2>
+      <table>
+        <tr><th>순위</th><th>선수</th><th>ELO</th></tr>
+        {% for i, (name, rating) in ranking %}
+        <tr>
+          <td>{{i}}</td>
+          <td>{{name}}</td>
+          <td>{{rating | int}}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>📊 통계</h2>
+      <div class="log-box">
+        <p>총 경기 수: {{stats.total_matches}}</p>
+        <p>평균 Elo: {{stats.avg_elo}}</p>
+        <p>최고 Elo: {{stats.max_player}} ({{stats.max_rating}})</p>
+        <p>최저 Elo: {{stats.min_player}} ({{stats.min_rating}})</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🕘 최근 경기 로그</h2>
+      <div class="log-box">
+        <ul>
+        {% for rec in recent %}
+          <li>[{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} → {{rec.result}}</li>
+        {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+  </div>
 
 </body>
 </html>
 """
 
-
 @app.route("/")
 def index():
-    ranking = get_ranking()
+    ranking = list(enumerate(get_ranking(), start=1))
     recent = get_recent_matches(15)
     stats = get_simple_stats()
 
+    # dict를 객체처럼 사용
     class S: pass
     s = S()
     for k, v in stats.items():
@@ -104,7 +199,6 @@ def add_match():
         update_elo_with_score(p1, p2, g1, g2)
 
     return redirect(url_for("index"))
-
 
 if __name__ == "__main__":
     app.run(debug=True)
