@@ -133,7 +133,7 @@ HTML = """
         {% for i, (name, rating) in ranking %}
         <tr>
           <td>{{i}}</td>
-          <td>{{name}}</td>
+          <td><a href="/player/{{name}}" style="color:white;">{{name}}</a></td>
           <td>{{rating | int}}</td>
         </tr>
         {% endfor %}
@@ -202,3 +202,61 @@ def add_match():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+@app.route("/player/<name>")
+def player_profile(name):
+    from league_core import match_log
+
+    # 해당 선수 경기만 필터
+    games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
+
+    # 통계 계산
+    wins = 0
+    draws = 0
+    losses = 0
+    goals_for = 0
+    goals_against = 0
+
+    for g in games:
+        if g["p1"] == name:
+            gf = g["score1"]
+            ga = g["score2"]
+        else:
+            gf = g["score2"]
+            ga = g["score1"]
+
+        goals_for += gf
+        goals_against += ga
+
+        if gf > ga:
+            wins += 1
+        elif gf < ga:
+            losses += 1
+        else:
+            draws += 1
+
+    total = wins + draws + losses
+    win_rate = round((wins / total) * 100, 2) if total > 0 else 0
+
+    return render_template_string("""
+    <h1>{{name}} 선수 프로필</h1>
+    <p>총 경기: {{total}}</p>
+    <p>승: {{wins}}, 무: {{draws}}, 패: {{losses}}</p>
+    <p>득점: {{goals_for}}, 실점: {{goals_against}}</p>
+    <p>승률: {{win_rate}}%</p>
+
+    <h2>최근 경기 기록</h2>
+    <ul>
+    {% for g in games[-10:] %}
+        <li>[{{g.time}}] {{g.p1}} {{g.score1}} : {{g.score2}} {{g.p2}}</li>
+    {% endfor %}
+    </ul>
+
+    <br>
+    <a href="/">← 메인으로</a>
+    """,
+    name=name,
+    games=games,
+    wins=wins, draws=draws, losses=losses,
+    goals_for=goals_for, goals_against=goals_against,
+    total=total, win_rate=win_rate)
