@@ -1,18 +1,49 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, redirect, url_for, send_file
 from league_core import (
-    elo, update_elo_with_score,
-    get_ranking, get_recent_matches, get_simple_stats
+    elo, update_elo_with_score, get_ranking,
+    get_recent_matches, get_simple_stats,
+    elo_history
 )
+
+import matplotlib.pyplot as plt
+import os
 
 app = Flask(__name__)
 
-HTML = """
+# =======================
+# 프로필 Elo 그래프 생성 함수
+# =======================
+from io import BytesIO
+
+def generate_elo_graph(player_name):
+    times = [t for t, _ in elo_history[player_name]]
+    ratings = [r for _, r in elo_history[player_name]]
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(times, ratings, marker='o')
+    plt.title(f"{player_name} Elo 변화")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    img = BytesIO()
+    plt.savefig(img, format="png")
+    img.seek(0)
+    plt.close()
+
+    return img
+
+
+
+# =======================
+# 메인 페이지 HTML
+# =======================
+
+HTML_MAIN = """
 <!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <title>FIFA ELO 리그</title>
-
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
 
   <style>
@@ -23,20 +54,13 @@ HTML = """
       color: white;
       padding: 20px;
     }
-
     h1 {
       text-align: center;
       font-weight: 700;
       font-size: 38px;
       color: #9b59ff;
-      text-shadow: 0 0 10px rgba(155, 89, 255, 0.7);
     }
-
-    .container {
-      max-width: 900px;
-      margin: auto;
-    }
-
+    .container { max-width: 900px; margin: auto; }
     .card {
       background: #151537;
       border-radius: 12px;
@@ -44,52 +68,20 @@ HTML = """
       margin-top: 25px;
       box-shadow: 0 0 15px rgba(155, 89, 255, 0.2);
     }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 15px;
-    }
-
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
     th {
-      background: #9b59ff;
-      padding: 12px;
-      text-align: left;
-      border-radius: 8px;
+      background: #9b59ff; padding: 12px; text-align: left; border-radius: 8px;
     }
-
-    td {
-      padding: 10px;
-      border-bottom: 1px solid #2e2e50;
-    }
-
-    tr:hover {
-      background: rgba(155, 89, 255, 0.15);
-    }
-
+    td { padding: 10px; border-bottom: 1px solid #2e2e50; }
+    tr:hover { background: rgba(155, 89, 255, 0.15); }
     input, select, button {
-      padding: 10px;
-      margin: 5px 0;
-      border-radius: 8px;
-      border: none;
-      font-size: 15px;
+      padding: 10px; margin: 5px 0;
+      border-radius: 8px; border: none; font-size: 15px;
     }
-
     button {
-      background: #9b59ff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: 0.2s;
+      background: #9b59ff; font-weight: 600; cursor: pointer;
     }
-
-    button:hover {
-      background: #b57dff;
-      transform: scale(1.04);
-    }
-
-    .log-box {
-      padding-left: 15px;
-    }
+    button:hover { background: #b57dff; transform: scale(1.04); }
   </style>
 </head>
 
@@ -118,7 +110,6 @@ HTML = """
         <input type="number" name="g2" placeholder="점수2">
 
         <br>
-
         <button type="submit">경기 기록</button>
       </form>
     </div>
@@ -139,30 +130,26 @@ HTML = """
 
     <div class="card">
       <h2>📊 통계</h2>
-      <div class="log-box">
-        <p>총 경기 수: {{stats.total_matches}}</p>
-        <p>평균 Elo: {{stats.avg_elo}}</p>
-        <p>최고 Elo: {{stats.max_player}} ({{stats.max_rating}})</p>
-        <p>최저 Elo: {{stats.min_player}} ({{stats.min_rating}})</p>
-      </div>
+      <p>총 경기 수: {{stats.total_matches}}</p>
+      <p>평균 Elo: {{stats.avg_elo}}</p>
+      <p>최고 Elo: {{stats.max_player}} ({{stats.max_rating}})</p>
+      <p>최저 Elo: {{stats.min_player}} ({{stats.min_rating}})</p>
     </div>
 
     <div class="card">
       <h2>🕘 최근 경기 로그</h2>
-      <div class="log-box">
-        <ul>
-        {% for rec in recent %}
-          <li>[{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} → {{rec.result}}</li>
-        {% endfor %}
-        </ul>
-      </div>
+      <ul>
+      {% for rec in recent %}
+        <li>[{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} → {{rec.result}}</li>
+      {% endfor %}
+      </ul>
     </div>
 
   </div>
-
 </body>
 </html>
 """
+
 
 @app.route("/")
 def index():
@@ -176,12 +163,13 @@ def index():
         setattr(s, k, v)
 
     return render_template_string(
-        HTML,
+        HTML_MAIN,
         players=list(elo.keys()),
         ranking=ranking,
         recent=recent,
         stats=s
     )
+
 
 @app.route("/add", methods=["POST"])
 def add_match():
@@ -195,10 +183,15 @@ def add_match():
 
     return redirect(url_for("index"))
 
+
+# =======================
+# 프로필 페이지
+# =======================
 @app.route("/player/<name>")
 def player_profile(name):
     from league_core import match_log
 
+    # 개인 경기만 필터링
     games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
 
     wins = draws = losses = 0
@@ -215,15 +208,15 @@ def player_profile(name):
         goals_for += gf
         goals_against += ga
 
-        if gf > ga:
-            wins += 1
-        elif gf < ga:
-            losses += 1
-        else:
-            draws += 1
+        if gf > ga: wins += 1
+        elif gf < ga: losses += 1
+        else: draws += 1
 
     total = wins + draws + losses
-    win_rate = round((wins / total) * 100, 2) if total > 0 else 0
+    win_rate = round((wins / total) * 100, 2) if total else 0
+
+    # Elo 그래프 생성
+    graph_path = generate_elo_graph(name)
 
     return render_template_string("""
     <h1>{{name}} 선수 프로필</h1>
@@ -232,15 +225,17 @@ def player_profile(name):
     <p>득점: {{goals_for}}, 실점: {{goals_against}}</p>
     <p>승률: {{win_rate}}%</p>
 
+    <h2>Elo 변화 그래프</h2>
+    <img src="/graph/{{name}}">
+
     <h2>최근 경기 기록</h2>
     <ul>
-    {% for g in games[-10:] %}
-        <li>[{{g.time}}] {{g.p1}} {{g.score1}} : {{g.score2}} {{g.p2}}</li>
+    {% for g in games[-15:] %}
+        <li>[{{g.time}}] {{g.p1}} {{g.score1}} : {{g.score2}} {{g.p2}} </li>
     {% endfor %}
     </ul>
 
-    <br>
-    <a href="/">← 메인으로</a>
+    <br><a href="/">← 메인으로</a>
     """,
     name=name,
     games=games,
@@ -248,6 +243,14 @@ def player_profile(name):
     goals_for=goals_for, goals_against=goals_against,
     total=total, win_rate=win_rate)
 
-# 🔥 반드시 맨 마지막!
+# 그래프 PNG 제공
+@app.route("/graph/<name>")
+def graph_file(name):
+    img = generate_elo_graph(name)
+    return send_file(img, mimetype="image/png")
+
+
+
+# Flask 실행
 if __name__ == "__main__":
     app.run(debug=True)
