@@ -1,14 +1,17 @@
-from flask import Flask, render_template_string, request, redirect, url_for, send_file
+from flask import Flask, render_template_string, request, redirect, url_for, send_file, session
 from league_core import (
     elo, update_elo_with_score, get_ranking,
     get_recent_matches, get_simple_stats,
-    elo_history, player_info
+    elo_history, player_info,
+    reset_all, delete_last_match   # 🔥 방금 만든 거 가져오기
 )
 
 import matplotlib.pyplot as plt
 from io import BytesIO
 
 app = Flask(__name__)
+app.secret_key = "fifa-secret-key-change-this"  # 대충 아무 문자열이나, 나중에 바꿔도 됨
+
 
 # =======================
 # Elo 그래프 생성
@@ -164,7 +167,9 @@ HTML_MAIN = """
       {% endfor %}
       </ul>
     </div>
-
+    <p style="margin-top:20px; text-align:right; font-size:12px;">
+      <a href="/admin/login" style="color:#666;">관리자 로그인</a>
+    </p>
   </div>
 </body>
 </html>
@@ -209,6 +214,84 @@ def add_match():
 
     return redirect(url_for("index"))
 
+
+# =======================
+# 관리자 로그인
+# =======================
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    error = None
+    if request.method == "POST":
+        pw = request.form.get("password")
+        # 🔥 여기 비밀번호는 네가 정해라
+        if pw == "fifa1234":
+            session["is_admin"] = True
+            return redirect(url_for("admin_panel"))
+        else:
+            error = "비밀번호가 틀렸습니다."
+
+    return render_template_string("""
+    <h1>관리자 로그인</h1>
+    {% if error %}
+      <p style="color:red;">{{error}}</p>
+    {% endif %}
+    <form method="post">
+      <input type="password" name="password" placeholder="비밀번호">
+      <button type="submit">로그인</button>
+    </form>
+    <a href="/">← 메인으로</a>
+    """, error=error)
+
+# =======================
+# 관리자 패널
+# =======================
+@app.route("/admin")
+def admin_panel():
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+
+    return render_template_string("""
+    <h1>관리자 패널</h1>
+
+    <form method="post" action="{{ url_for('admin_reset') }}">
+      <button type="submit" style="background:#e74c3c; color:white; padding:10px 20px; border:none; border-radius:8px;">
+        ⚠ 전체 초기화 (모든 Elo & 기록 삭제)
+      </button>
+    </form>
+
+    <br>
+
+    <form method="post" action="{{ url_for('admin_delete_last') }}">
+      <button type="submit" style="background:#f1c40f; color:black; padding:10px 20px; border:none; border-radius:8px;">
+        ⏪ 마지막 경기 1개 되돌리기
+      </button>
+    </form>
+
+    <br><br>
+    <a href="/">← 메인으로</a>
+    """)
+# =======================
+# 전체 초기화
+# =======================
+@app.route("/admin/reset", methods=["POST"])
+def admin_reset():
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+
+    reset_all()
+    return redirect(url_for("admin_panel"))
+
+
+# =======================
+# 마지막 경기 삭제
+# =======================
+@app.route("/admin/delete_last", methods=["POST"])
+def admin_delete_last():
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+
+    delete_last_match()
+    return redirect(url_for("admin_panel"))
 
 # =======================
 # 선수 프로필
