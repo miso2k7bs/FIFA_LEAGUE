@@ -165,3 +165,92 @@ def load_player_info():
 # JSON 데이터 로드 실행
 load_player_info()
 
+# ==========================
+# 관리자용 유틸 (초기화 / 마지막 경기 삭제)
+# ==========================
+
+def reset_all():
+    """모든 Elo, 경기 기록, 히스토리 초기화"""
+    global elo, match_log, elo_history
+
+    # Elo 점수 초기화
+    elo = INITIAL_ELO.copy()
+
+    # 경기 로그 메모리에서 비우기
+    match_log.clear()
+
+    # Elo 히스토리 초기화
+    for name in elo_history:
+        elo_history[name] = []
+
+    # CSV 파일 삭제 (기록 완전 초기화)
+    if os.path.isfile(LOG_FILE):
+        os.remove(LOG_FILE)
+
+
+def delete_last_match():
+    """마지막 경기 하나 지우고 Elo 전부 다시 계산"""
+    global elo, match_log, elo_history
+
+    if not match_log:
+        return  # 기록 없으면 그냥 종료
+
+    # 1) 메모리에서 마지막 경기 삭제
+    match_log.pop()
+
+    # 2) CSV 파일을 통째로 다시 저장
+    #    (현재 match_log 기준으로 갈아쓰기)
+    with open(LOG_FILE, "w", newline="", encoding="utf-8") as f:
+        if match_log:
+            writer = csv.DictWriter(f, fieldnames=match_log[0].keys())
+            writer.writeheader()
+            for row in match_log:
+                writer.writerow(row)
+
+    # 3) Elo, 히스토리 초기화 후 다시 계산
+    elo = INITIAL_ELO.copy()
+    for name in elo_history:
+        elo_history[name] = []
+
+    for row in match_log:
+        update_elo_with_score(
+            row["p1"],
+            row["p2"],
+            int(row["score1"]),
+            int(row["score2"]),
+            log_save=False,  # 다시 CSV에 안 쓰도록
+        )
+
+def reset_all():
+    global elo, match_log, elo_history
+    elo = INITIAL_ELO.copy()
+    match_log = []
+    elo_history = {name: [] for name in INITIAL_ELO}
+
+    # 파일 삭제
+    if os.path.isfile(LOG_FILE):
+        os.remove(LOG_FILE)
+
+
+def delete_last_match():
+    if not match_log:
+        return  # 삭제할 게 없음
+
+    # 마지막 경기 꺼내기
+    last = match_log.pop()
+
+    # CSV 다시 저장
+    with open(LOG_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=last.keys())
+        writer.writeheader()
+        for row in match_log:
+            writer.writerow(row)
+
+    # Elo 다시 계산
+    global elo, elo_history
+    elo = INITIAL_ELO.copy()
+    elo_history = {name: [] for name in INITIAL_ELO}
+
+    for row in match_log:
+        update_elo_with_score(row["p1"], row["p2"], row["score1"], row["score2"], log_save=False)
+    
