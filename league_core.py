@@ -1,10 +1,8 @@
-# league_core.py
 import csv
 import os
 from datetime import datetime
-import math
 
-# --- 선수 목록 & 초기 Elo (네 서열 + 실력차 반영) ---
+# --- 선수 목록 & 초기 Elo ---
 INITIAL_ELO = {
     "정진욱": 1700,
     "신지후": 1680,
@@ -21,7 +19,20 @@ INITIAL_ELO = {
 elo = INITIAL_ELO.copy()
 match_log = []
 
+import json
+
+STATS_FILE = "player_info.json"
+
+player_info = {name: {"strength": "", "style": ""} for name in INITIAL_ELO}
+
+
 LOG_FILE = "match_log.csv"
+
+
+# ==========================
+# Elo 히스토리 딕셔너리 (정상 버전)
+# ==========================
+elo_history = {name: [] for name in INITIAL_ELO}
 
 
 # ==========================
@@ -38,18 +49,24 @@ def save_match_to_csv(record):
         writer.writerow(record)
 
 
+# ==========================
+# CSV 불러오기 (Elo 재계산 포함)
+# ==========================
+
 def load_history():
-    """Render 재부팅 시 CSV에서 다시 불러오기"""
+    """CSV를 읽고 Elo/히스토리 모두 복구"""
     if not os.path.isfile(LOG_FILE):
         return
 
     with open(LOG_FILE, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # 문자열을 정수로 변환
             row["score1"] = int(row["score1"])
             row["score2"] = int(row["score2"])
             match_log.append(row)
+
+            # Elo 재계산
+            update_elo_with_score(row["p1"], row["p2"], row["score1"], row["score2"], log_save=False)
 
 
 # ==========================
@@ -63,7 +80,7 @@ def expected(a, b):
 K = 32
 
 
-def update_elo_with_score(p1, p2, g1, g2):
+def update_elo_with_score(p1, p2, g1, g2, log_save=True):
     R1 = elo[p1]
     R2 = elo[p2]
 
@@ -78,14 +95,14 @@ def update_elo_with_score(p1, p2, g1, g2):
         S1, S2 = 0.5, 0.5
         result = "무승부"
 
-    # 새로운 Elo 계산
+    # 새 Elo 계산
     E1 = expected(R1, R2)
     E2 = expected(R2, R1)
 
     elo[p1] = R1 + K * (S1 - E1)
     elo[p2] = R2 + K * (S2 - E2)
 
-    # 로그 기록
+    # 로그 생성
     record = {
         "p1": p1,
         "p2": p2,
@@ -95,8 +112,14 @@ def update_elo_with_score(p1, p2, g1, g2):
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    match_log.append(record)
-    save_match_to_csv(record)
+    # 새 경기일 경우만 CSV 저장
+    if log_save:
+        match_log.append(record)
+        save_match_to_csv(record)
+
+    # Elo 히스토리 추가
+    elo_history[p1].append((record["time"], int(elo[p1])))
+    elo_history[p2].append((record["time"], int(elo[p2])))
 
 
 # ==========================
@@ -125,5 +148,20 @@ def get_simple_stats():
     }
 
 
-# 서버 시작 시 기존 CSV 기록 불러오기
+# 서버 시작 시 CSV 로드 + Elo 재계산
 load_history()
+
+def save_player_info():
+    with open(STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(player_info, f, ensure_ascii=False, indent=2)
+
+
+def load_player_info():
+    if os.path.isfile(STATS_FILE):
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            player_info.update(data)
+
+# JSON 데이터 로드 실행
+load_player_info()
+
