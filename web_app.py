@@ -188,29 +188,12 @@ def index():
     )
 
 
-@app.route("/add", methods=["POST"])
-def add_match():
-    p1 = request.form.get("p1")
-    p2 = request.form.get("p2")
-    g1 = int(request.form.get("g1"))
-    g2 = int(request.form.get("g2"))
-
-    if p1 != p2:
-        update_elo_with_score(p1, p2, g1, g2)
-
-    return redirect(url_for("index"))
-
-if __name__ == "__main__":
-    app.run(debug=True)
-
 @app.route("/player/<name>")
 def player_profile(name):
     from league_core import match_log
 
-    # 해당 선수 경기만 필터
     games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
 
-    # 통계 계산
     wins = 0
     draws = 0
     losses = 0
@@ -260,3 +243,6 @@ def player_profile(name):
     wins=wins, draws=draws, losses=losses,
     goals_for=goals_for, goals_against=goals_against,
     total=total, win_rate=win_rate)
+
+if __name__ == "__main__":
+    app.run(debug=True)
