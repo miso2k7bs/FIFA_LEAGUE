@@ -163,7 +163,10 @@ HTML_MAIN = """
       <h2>🕘 최근 경기 로그</h2>
       <ul>
       {% for rec in recent %}
-        <li>[{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} → {{rec.result}}</li>
+<li>
+  [{{rec.time}}] {{rec.p1}} {{rec.score1}} : {{rec.score2}} {{rec.p2}} → {{rec.result}}
+  <a href="/edit_match/{{loop.index0}}" style="color:#9b59ff; margin-left:10px;">수정</a>
+</li>
       {% endfor %}
       </ul>
     </div>
@@ -214,6 +217,57 @@ def add_match():
 
     return redirect(url_for("index"))
 
+<div class="card">
+  <h2>📒 경기 입력</h2>
+
+  <form method="post" action="{{ url_for('add_match') }}">
+    <select name="p1" onchange="updatePrediction()">
+      {% for name in players %}
+      <option value="{{name}}">{{name}}</option>
+      {% endfor %}
+    </select>
+
+    <input type="number" name="g1" placeholder="점수1">
+
+    <br>
+
+    <select name="p2" onchange="updatePrediction()">
+      {% for name in players %}
+      <option value="{{name}}">{{name}}</option>
+      {% endfor %}
+    </select>
+
+    <input type="number" name="g2" placeholder="점수2">
+
+    <br>
+    <button type="submit">경기 기록</button>
+  </form>
+
+  <div id="predict_box" style="margin-top:15px; font-size:14px; color:#aaa;">
+    상대 선택하면 승률이 표시됩니다.
+  </div>
+
+  <script>
+  function updatePrediction() {
+    const p1 = document.querySelector("select[name='p1']").value;
+    const p2 = document.querySelector("select[name='p2']").value;
+
+    if (p1 === p2) {
+      document.getElementById("predict_box").innerHTML =
+        "두 선수는 서로 다른 선수여야 합니다.";
+      return;
+    }
+
+    fetch(`/predict/${p1}/${p2}`)
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById("predict_box").innerHTML =
+          `예상 승률 → <b>${data.p1}</b>: ${data.win1}% &nbsp; | &nbsp;
+           <b>${data.p2}</b>: ${data.win2}%`;
+      });
+  }
+  </script>
+</div>
 
 # =======================
 # 관리자 로그인
@@ -224,7 +278,7 @@ def admin_login():
     if request.method == "POST":
         pw = request.form.get("password")
         # 🔥 여기 비밀번호는 네가 정해라
-        if pw == "fifa1234":
+        if pw == "spiderman7413!":
             session["is_admin"] = True
             return redirect(url_for("admin_panel"))
         else:
@@ -403,5 +457,55 @@ def graph_file(name):
 # =======================
 # 실행
 # =======================
+@app.route("/edit_match/<int:index>", methods=["GET", "POST"])
+def edit_match(index):
+    from league_core import match_log, save_match_to_csv, rewrite_all_csv
+
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+
+    game = match_log[index]
+
+    if request.method == "POST":
+        new_g1 = int(request.form.get("g1"))
+        new_g2 = int(request.form.get("g2"))
+
+        game["score1"] = new_g1
+        game["score2"] = new_g2
+
+        rewrite_all_csv()
+        return redirect(url_for("index"))
+
+    return render_template_string("""
+        <h1>경기 수정</h1>
+        <p>{{game.p1}} vs {{game.p2}}</p>
+
+        <form method="post">
+            <input type="number" name="g1" value="{{game.score1}}">
+            <input type="number" name="g2" value="{{game.score2}}">
+            <button type="submit">저장</button>
+        </form>
+
+        <a href="/">← 메인으로</a>
+    """, game=game)
 if __name__ == "__main__":
     app.run(debug=True)
+
+@app.route("/predict/<p1>/<p2>")
+def predict(p1, p2):
+    import math
+    from league_core import elo
+
+    R1 = elo[p1]
+    R2 = elo[p2]
+
+    # 예상 승률 공식
+    E1 = 1 / (1 + 10 ** ((R2 - R1) / 400))
+    E2 = 1 - E1
+
+    return {
+        "p1": p1,
+        "p2": p2,
+        "win1": round(E1 * 100, 1),
+        "win2": round(E2 * 100, 1)
+    }
