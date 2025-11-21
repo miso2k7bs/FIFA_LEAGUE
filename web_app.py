@@ -1,4 +1,3 @@
-# web_app.py
 from flask import Flask, render_template_string, request, redirect, url_for
 from league_core import (
     elo, update_elo_with_score,
@@ -12,10 +11,8 @@ HTML = """
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-
   <title>FIFA ELO 리그</title>
 
-  <!-- 구글 폰트 -->
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
 
   <style>
@@ -173,7 +170,6 @@ def index():
     recent = get_recent_matches(15)
     stats = get_simple_stats()
 
-    # dict를 객체처럼 사용
     class S: pass
     s = S()
     for k, v in stats.items():
@@ -187,6 +183,17 @@ def index():
         stats=s
     )
 
+@app.route("/add", methods=["POST"])
+def add_match():
+    p1 = request.form.get("p1")
+    p2 = request.form.get("p2")
+    g1 = int(request.form.get("g1"))
+    g2 = int(request.form.get("g2"))
+
+    if p1 != p2:
+        update_elo_with_score(p1, p2, g1, g2)
+
+    return redirect(url_for("index"))
 
 @app.route("/player/<name>")
 def player_profile(name):
@@ -194,11 +201,8 @@ def player_profile(name):
 
     games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
 
-    wins = 0
-    draws = 0
-    losses = 0
-    goals_for = 0
-    goals_against = 0
+    wins = draws = losses = 0
+    goals_for = goals_against = 0
 
     for g in games:
         if g["p1"] == name:
@@ -244,5 +248,6 @@ def player_profile(name):
     goals_for=goals_for, goals_against=goals_against,
     total=total, win_rate=win_rate)
 
+# 🔥 반드시 맨 마지막!
 if __name__ == "__main__":
     app.run(debug=True)
