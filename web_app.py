@@ -240,12 +240,36 @@ def add_match():
     <input type="number" name="g2" placeholder="점수2">
 
     <br>
+
     <button type="submit">경기 기록</button>
   </form>
 
   <div id="predict_box" style="margin-top:15px; font-size:14px; color:#aaa;">
     상대 선택하면 승률이 표시됩니다.
   </div>
+
+  <script>
+  function updatePrediction() {
+    const p1 = document.querySelector("select[name='p1']").value;
+    const p2 = document.querySelector("select[name='p2']").value;
+
+    if (p1 === p2) {
+      document.getElementById("predict_box").innerHTML =
+        "두 선수는 서로 다른 선수여야 합니다.";
+      return;
+    }
+
+    fetch(`/predict/${p1}/${p2}`)
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById("predict_box").innerHTML =
+          `예상 승률 → <b>${data.p1}</b>: ${data.win1}% &nbsp; | &nbsp; 
+           <b>${data.p2}</b>: ${data.win2}%`;
+      });
+  }
+  </script>
+</div>
+
 
   <script>
   function updatePrediction() {

@@ -254,3 +254,9 @@ def delete_last_match():
     for row in match_log:
         update_elo_with_score(row["p1"], row["p2"], row["score1"], row["score2"], log_save=False)
     
+def rewrite_all_csv():
+    with open(LOG_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["p1", "p2", "score1", "score2", "result", "time"])
+        writer.writeheader()
+        for row in match_log:
+            writer.writerow(row)
