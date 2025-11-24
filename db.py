@@ -11,18 +11,24 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # 유저 테이블
+    # 유저 테이블 생성
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         password TEXT,
         money INTEGER DEFAULT 100000000,
-        is_admin INTEGER DEFAULT 0
+        is_admin INTEGER DEFAULT 0,
+        badge TEXT DEFAULT '',
+        name_color TEXT DEFAULT '#ffffff',
+        double_profit INTEGER DEFAULT 0,
+        risk_cancel INTEGER DEFAULT 0,
+        challenge_ticket INTEGER DEFAULT 0,
+        profile_ticket INTEGER DEFAULT 0
     );
     """)
 
-    # 베팅 테이블
+    # 베팅 테이블 생성
     cur.execute("""
     CREATE TABLE IF NOT EXISTS bets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
