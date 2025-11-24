@@ -42,7 +42,7 @@ def init_db():
     );
     """)
 
-    # 플레이어 프로필 테이블 생성 (⚠️ commit/close 전에 있어야 함)
+    # 플레이어 프로필 테이블 생성 (⭐ 이게 문제였던 부분)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS player_profiles (
         name TEXT PRIMARY KEY,
