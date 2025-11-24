@@ -201,7 +201,7 @@ HTML_MAIN = """
   <p style="margin-top:20px; text-align:right; font-size:13px;">
     <a href="/shop" style="color:#9b59ff;">상점</a> |
     <a href="/rich" style="color:#9b59ff;">부자 랭킹</a> |
-    <a href="/admin/login" style="color:#9b59ff;">관리자</a>
+    <a href="/admin/login_price" style="color:#9b59ff;">관리자</a>
   </p>
 
 </div>
