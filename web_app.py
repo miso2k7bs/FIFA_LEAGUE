@@ -293,6 +293,7 @@ def add_match():
     ).fetchall()
 
     for b in bets:
+    for b in bets:
     user = db.execute(
         "SELECT * FROM users WHERE id=?",
         (b["user_id"],)
@@ -300,26 +301,46 @@ def add_match():
 
     payout = b["amount"] * 2
 
-    if winner == b["pick"]:
-        # 승리
+    # 2배 이득권 적용
+    if user["double_profit"] > 0:
+        payout = b["amount"] * 3
+        db.execute(
+            "UPDATE users SET double_profit = double_profit - 1 WHERE id=?",
+            (user["id"],)
+        )
+
+    # 베팅 승리
+    if b["pick"] == winner:
         db.execute(
             "UPDATE users SET money = money + ? WHERE id=?",
-            (payout, user["id"])
+            (payout, b["user_id"])
         )
         db.execute(
             "UPDATE bets SET result='win', payout=? WHERE id=?",
             (payout, b["id"])
         )
+
+    # 베팅 패배
     else:
-        # 패배
+        # 손실 최소화권 → 절반 환불
+        if user["risk_cancel"] > 0:
+            refund = b["amount"] // 2
+            db.execute(
+                "UPDATE users SET money = money + ? WHERE id=?",
+                (refund, user["id"])
+            )
+            db.execute(
+                "UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?",
+                (user["id"],)
+            )
+
         db.execute(
-            "UPDATE bets SET result='lose', payout=0 WHERE id=?",
+            "UPDATE bets SET result='lose' WHERE id=?",
             (b["id"],)
         )
 
 db.commit()
 return redirect("/")
-
 
 
 # ============================
