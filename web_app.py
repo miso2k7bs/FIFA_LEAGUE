@@ -571,11 +571,15 @@ def edit_player(name):
         return redirect("/login")
 
     db = get_db()
-
-    # 프로필 수정권 체크
     ticket_row = db.execute(
         "SELECT profile_ticket FROM users WHERE id=?",
         (session["user_id"],)
+    ).fetchone()
+
+    # DB에서 기존 프로필 가져오기
+    row = db.execute(
+        "SELECT * FROM player_profiles WHERE name=?",
+        (name,)
     ).fetchone()
 
     if request.method == "POST":
@@ -585,24 +589,20 @@ def edit_player(name):
         strength = request.form.get("strength", "")
         style = request.form.get("style", "")
 
-        # player_profiles 행이 존재하는지 확인
-        row = db.execute(
-            "SELECT * FROM player_profiles WHERE name=?",
-            (name,)
-        ).fetchone()
-
-        if row:
+        # 프로필 없으면 새로 생성
+        if row is None:
+            db.execute(
+                "INSERT INTO player_profiles(name, strength, style) VALUES(?,?,?)",
+                (name, strength, style)
+            )
+        else:
+            # 기존 프로필 업데이트
             db.execute(
                 "UPDATE player_profiles SET strength=?, style=? WHERE name=?",
                 (strength, style, name)
             )
-        else:
-            db.execute(
-                "INSERT INTO player_profiles(name, strength, style) VALUES (?,?,?)",
-                (name, strength, style)
-            )
 
-        # 수정권 사용
+        # 사용한 티켓 1개 차감
         db.execute(
             "UPDATE users SET profile_ticket = profile_ticket - 1 WHERE id=?",
             (session["user_id"],)
@@ -611,18 +611,35 @@ def edit_player(name):
         db.commit()
         return redirect(url_for("player_profile", name=name))
 
-    # GET → 기존 정보 불러오기
-    row = db.execute(
-        "SELECT * FROM player_profiles WHERE name=?",
-        (name,)
-    ).fetchone()
+    # 화면에는 DB값이 있으면 DB값, 없으면 player_info 기본값 표시
+    strength_default = row["strength"] if row else player_info[name]["strength"]
+    style_default = row["style"] if row else player_info[name]["style"]
 
-    if row:
-        strength = row["strength"]
-        style = row["style"]
-    else:
-        strength = player_info[name]["strength"]
-        style = player_info[name]["style"]
+    return render_template_string("""
+    <h1>{{name}} 정보 수정</h1>
+
+    {% if ticket_row.profile_ticket <= 0 %}
+        <p style="color:red;">⚠ 프로필 수정권이 없습니다!</p>
+    {% endif %}
+
+    <form method="post">
+        <p>강점:</p>
+        <textarea name="strength" rows="3" cols="40">{{strength_default}}</textarea>
+
+        <p>플레이스타일:</p>
+        <textarea name="style" rows="3" cols="40">{{style_default}}</textarea>
+
+        <br><br>
+        <button type="submit">저장</button>
+    </form>
+
+    <a href="/player/{{name}}">← 돌아가기</a>
+    """,
+    name=name,
+    ticket_row=ticket_row,
+    strength_default=strength_default,
+    style_default=style_default)
+
 
     return render_template_string("""
     <h1>{{name}} 정보 수정</h1>
