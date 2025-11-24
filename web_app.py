@@ -263,23 +263,29 @@ def predict(p1, p2):
 # ============================
 # 경기 입력 + 베팅 정산
 # ============================
+# ============================
+# 경기 입력 + 베팅 정산
+# ============================
 @app.route("/add", methods=["POST"])
 def add_match():
     p1 = request.form.get("p1")
     p2 = request.form.get("p2")
-    g1 = int(request.form.get("g1"))
-    g2 = int(request.form.get("g2"))
+    g1 = int(request.form.get("g1") or 0)
+    g2 = int(request.form.get("g2") or 0)
 
-    if p1 == p2:
+    if not p1 or not p2 or p1 == p2:
         return redirect("/")
 
     update_elo_with_score(p1, p2, g1, g2)
-    elo[p1] = round(elo[p1])
-    elo[p2] = round(elo[p2])
-
 
     db = get_db()
-    winner = "p1" if g1 > g2 else "p2"
+
+    if g1 > g2:
+        winner = "p1"
+    elif g2 > g1:
+        winner = "p2"
+    else:
+        winner = "draw"
 
     bets = db.execute(
         "SELECT * FROM bets WHERE p1=? AND p2=? AND result='pending'",
@@ -288,76 +294,32 @@ def add_match():
 
     for b in bets:
     user = db.execute(
-        "SELECT * FROM users WHERE id=?", (b["user_id"],)
+        "SELECT * FROM users WHERE id=?",
+        (b["user_id"],)
     ).fetchone()
 
-    # 기본 배당
-    base_payout = b["amount"] * 2
+    payout = b["amount"] * 2
 
-    # 2배 이득권
-    if user["double_profit"] > 0:
-        base_payout = b["amount"] * 3
-        db.execute(
-            "UPDATE users SET double_profit = double_profit - 1 WHERE id=?",
-            (user["id"],)
-        )
-
-    # 결과에 따라 지급
-    if b["pick"] == winner:
+    if winner == b["pick"]:
+        # 승리
         db.execute(
             "UPDATE users SET money = money + ? WHERE id=?",
-            (base_payout, user["id"])
+            (payout, user["id"])
         )
         db.execute(
             "UPDATE bets SET result='win', payout=? WHERE id=?",
-            (base_payout, b["id"])
+            (payout, b["id"])
         )
     else:
-        # 손실 최소화권
-        if user["risk_cancel"] > 0:
-            refund = b["amount"] // 2
-            db.execute(
-                "UPDATE users SET money = money + ? WHERE id=?",
-                (refund, user["id"])
-            )
-            db.execute(
-                "UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?",
-                (user["id"],)
-            )
-
+        # 패배
         db.execute(
-            "UPDATE bets SET result='lose' WHERE id=?",
+            "UPDATE bets SET result='lose', payout=0 WHERE id=?",
             (b["id"],)
         )
 
+db.commit()
+return redirect("/")
 
-# ============================
-# 베팅
-# ============================
-@app.route("/bet", methods=["POST"])
-def bet():
-    if "user_id" not in session:
-        return redirect("/login")
-
-    p1 = request.form["p1"]
-    p2 = request.form["p2"]
-    pick = request.form["pick"]
-    amount = int(request.form["amount"])
-    user_id = session["user_id"]
-
-    db = get_db()
-    money = db.execute("SELECT money FROM users WHERE id=?", (user_id,)).fetchone()["money"]
-
-    if money < amount:
-        return "잔액 부족!"
-
-    db.execute("INSERT INTO bets(user_id, p1, p2, pick, amount) VALUES (?,?,?,?,?)",
-               (user_id, p1, p2, pick, amount))
-
-    db.execute("UPDATE users SET money = money - ? WHERE id=?", (amount, user_id))
-    db.commit()
-
-    return redirect("/")
 
 
 # ============================
@@ -590,7 +552,6 @@ def edit_player(name):
         (session["user_id"],)
     ).fetchone()
 
-    # DB에서 기존 프로필 가져오기
     row = db.execute(
         "SELECT * FROM player_profiles WHERE name=?",
         (name,)
@@ -603,20 +564,17 @@ def edit_player(name):
         strength = request.form.get("strength", "")
         style = request.form.get("style", "")
 
-        # 프로필 없으면 새로 생성
         if row is None:
             db.execute(
-                "INSERT INTO player_profiles(name, strength, style) VALUES(?,?,?)",
+                "INSERT INTO player_profiles(name, strength, style) VALUES (?,?,?)",
                 (name, strength, style)
             )
         else:
-            # 기존 프로필 업데이트
             db.execute(
                 "UPDATE player_profiles SET strength=?, style=? WHERE name=?",
                 (strength, style, name)
             )
 
-        # 사용한 티켓 1개 차감
         db.execute(
             "UPDATE users SET profile_ticket = profile_ticket - 1 WHERE id=?",
             (session["user_id"],)
@@ -625,7 +583,6 @@ def edit_player(name):
         db.commit()
         return redirect(url_for("player_profile", name=name))
 
-    # 화면에는 DB값이 있으면 DB값, 없으면 player_info 기본값 표시
     strength_default = row["strength"] if row else player_info[name]["strength"]
     style_default = row["style"] if row else player_info[name]["style"]
 
@@ -653,56 +610,6 @@ def edit_player(name):
     ticket_row=ticket_row,
     strength_default=strength_default,
     style_default=style_default)
-
-
-    return render_template_string("""
-    <h1>{{name}} 정보 수정</h1>
-
-    {% if ticket_row.profile_ticket <= 0 %}
-        <p style="color:red;">⚠ 프로필 수정권이 없습니다!</p>
-    {% endif %}
-
-    <form method="post">
-        <p>강점:</p>
-        <textarea name="strength" rows="3" cols="50">{{strength}}</textarea>
-
-        <p>플레이스타일:</p>
-        <textarea name="style" rows="3" cols="50">{{style}}</textarea>
-
-        <br><br>
-        <button type="submit">저장</button>
-    </form>
-
-    <a href="/player/{{name}}">← 돌아가기</a>
-    """, name=name, strength=strength, style=style, ticket_row=ticket_row)
-
-
-    # ===== GET: 수정 페이지 표시 =====
-    return render_template_string("""
-    <h1>{{name}} 정보 수정</h1>
-
-    {% if ticket_row.profile_ticket <= 0 %}
-        <p style="color:red;">⚠ 프로필 수정권이 없습니다!</p>
-    {% endif %}
-
-    <form method="post">
-        <p>강점:</p>
-        <textarea name="strength" rows="3" cols="40">{{strength_val}}</textarea>
-
-        <p>플레이스타일:</p>
-        <textarea name="style" rows="3" cols="40">{{style_val}}</textarea>
-
-        <br><br>
-        <button type="submit">저장</button>
-    </form>
-
-    <a href="/player/{{name}}">← 돌아가기</a>
-    """,
-    name=name,
-    ticket_row=ticket_row,
-    strength_val=strength_val,
-    style_val=style_val)
-
 
 
 # ============================
