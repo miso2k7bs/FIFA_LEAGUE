@@ -274,6 +274,9 @@ def add_match():
         return redirect("/")
 
     update_elo_with_score(p1, p2, g1, g2)
+    elo[p1] = round(elo[p1])
+    elo[p2] = round(elo[p2])
+
 
     db = get_db()
     winner = "p1" if g1 > g2 else "p2"
@@ -284,26 +287,31 @@ def add_match():
     ).fetchall()
 
     for b in bets:
-        user = db.execute("SELECT * FROM users WHERE id=?", (b["user_id"],)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id=?", (b["user_id"],)).fetchone()
 
-        base_payout = b["amount"] * 2
+    # None 방지
+    double_profit = user["double_profit"] or 0
+    risk_cancel = user["risk_cancel"] or 0
 
-        # 2배이득권 → 3배
-        if user["double_profit"] > 0:
-            base_payout = b["amount"] * 3
-            db.execute("UPDATE users SET double_profit = double_profit - 1 WHERE id=?", (user["id"],))
+    base_payout = b["amount"] * 2
 
-        if b["pick"] == winner:
-            db.execute("UPDATE users SET money = money + ? WHERE id=?", (base_payout, b["user_id"]))
-            db.execute("UPDATE bets SET result='win', payout=? WHERE id=?", (base_payout, b["id"]))
-        else:
-            # 손실 최소화권 → 절반 돌려줌
-            if user["risk_cancel"] > 0:
-                refund = b["amount"] // 2
-                db.execute("UPDATE users SET money = money + ? WHERE id=?", (refund, b["user_id"]))
-                db.execute("UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?", (user["id"],))
+    # 2배이득권 → 3배
+    if double_profit > 0:
+        base_payout = b["amount"] * 3
+        db.execute("UPDATE users SET double_profit = double_profit - 1 WHERE id=?", (user["id"],))
 
-            db.execute("UPDATE bets SET result='lose' WHERE id=?", (b["id"],))
+    if b["pick"] == winner:
+        db.execute("UPDATE users SET money = money + ? WHERE id=?", (base_payout, b["user_id"]))
+        db.execute("UPDATE bets SET result='win', payout=? WHERE id=?", (base_payout, b["id"]))
+    else:
+        # 손실 최소화권 → 절반 환불
+        if risk_cancel > 0:
+            refund = b["amount"] // 2
+            db.execute("UPDATE users SET money = money + ? WHERE id=?", (refund, b["user_id"]))
+            db.execute("UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?", (user["id"],))
+
+        db.execute("UPDATE bets SET result='lose' WHERE id=?", (b["id"],))
+
 
     db.commit()
     return redirect("/")
@@ -413,24 +421,27 @@ def logout():
 @app.route("/rich")
 def rich():
     db = get_db()
-    rows = db.execute("SELECT username, badge, name_color, money FROM users ORDER BY money DESC").fetchall()
+    rows = db.execute("""
+        SELECT username, badge, name_color, money
+        FROM users
+        ORDER BY money DESC
+    """).fetchall()
 
     return render_template_string("""
     <h1>💰 부자 랭킹</h1>
     <table>
-      <tr><th>순위</th><th>유저</th><th>보유금</th></tr>
-
-      {% for i, r in enumerate(rows, 1) %}
-      <tr>
-        <td>{{i}}</td>
-        <td>{{r.badge}} <b style="color:{{r.name_color}};">{{r.username}}</b></td>
-        <td>{{r.money}}</td>
-      </tr>
-      {% endfor %}
+        <tr><th>순위</th><th>유저</th><th>보유금</th></tr>
+        {% for i, r in enumerate(rows, 1) %}
+        <tr>
+            <td>{{i}}</td>
+            <td>{{r['badge']}} <b style="color:{{r['name_color']}}">{{r['username']}}</b></td>
+            <td>{{r['money']}}</td>
+        </tr>
+        {% endfor %}
     </table>
-
     <a href="/">← 메인</a>
-    """ , rows=rows)
+    """, rows=rows)
+
 # ============================
 # 선수 프로필
 # ============================
@@ -560,6 +571,8 @@ def edit_player(name):
         return redirect("/login")
 
     db = get_db()
+
+    # 프로필 수정권 체크
     ticket_row = db.execute(
         "SELECT profile_ticket FROM users WHERE id=?",
         (session["user_id"],)
@@ -569,17 +582,47 @@ def edit_player(name):
         if ticket_row["profile_ticket"] <= 0:
             return "프로필 수정권이 없습니다!"
 
+        strength = request.form.get("strength", "")
+        style = request.form.get("style", "")
+
+        # player_profiles 행이 존재하는지 확인
+        row = db.execute(
+            "SELECT * FROM player_profiles WHERE name=?",
+            (name,)
+        ).fetchone()
+
+        if row:
+            db.execute(
+                "UPDATE player_profiles SET strength=?, style=? WHERE name=?",
+                (strength, style, name)
+            )
+        else:
+            db.execute(
+                "INSERT INTO player_profiles(name, strength, style) VALUES (?,?,?)",
+                (name, strength, style)
+            )
+
+        # 수정권 사용
         db.execute(
             "UPDATE users SET profile_ticket = profile_ticket - 1 WHERE id=?",
             (session["user_id"],)
         )
 
-        player_info[name]["strength"] = request.form.get("strength")
-        player_info[name]["style"] = request.form.get("style")
-        save_player_info()
-
         db.commit()
         return redirect(url_for("player_profile", name=name))
+
+    # GET → 기존 정보 불러오기
+    row = db.execute(
+        "SELECT * FROM player_profiles WHERE name=?",
+        (name,)
+    ).fetchone()
+
+    if row:
+        strength = row["strength"]
+        style = row["style"]
+    else:
+        strength = player_info[name]["strength"]
+        style = player_info[name]["style"]
 
     return render_template_string("""
     <h1>{{name}} 정보 수정</h1>
@@ -590,10 +633,33 @@ def edit_player(name):
 
     <form method="post">
         <p>강점:</p>
-        <textarea name="strength" rows="3" cols="40">{{info.strength}}</textarea>
+        <textarea name="strength" rows="3" cols="50">{{strength}}</textarea>
 
         <p>플레이스타일:</p>
-        <textarea name="style" rows="3" cols="40">{{info.style}}</textarea>
+        <textarea name="style" rows="3" cols="50">{{style}}</textarea>
+
+        <br><br>
+        <button type="submit">저장</button>
+    </form>
+
+    <a href="/player/{{name}}">← 돌아가기</a>
+    """, name=name, strength=strength, style=style, ticket_row=ticket_row)
+
+
+    # ===== GET: 수정 페이지 표시 =====
+    return render_template_string("""
+    <h1>{{name}} 정보 수정</h1>
+
+    {% if ticket_row.profile_ticket <= 0 %}
+        <p style="color:red;">⚠ 프로필 수정권이 없습니다!</p>
+    {% endif %}
+
+    <form method="post">
+        <p>강점:</p>
+        <textarea name="strength" rows="3" cols="40">{{strength_val}}</textarea>
+
+        <p>플레이스타일:</p>
+        <textarea name="style" rows="3" cols="40">{{style_val}}</textarea>
 
         <br><br>
         <button type="submit">저장</button>
@@ -602,8 +668,10 @@ def edit_player(name):
     <a href="/player/{{name}}">← 돌아가기</a>
     """,
     name=name,
-    info=player_info[name],
-    ticket_row=ticket_row)
+    ticket_row=ticket_row,
+    strength_val=strength_val,
+    style_val=style_val)
+
 
 
 # ============================
