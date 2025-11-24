@@ -287,34 +287,48 @@ def add_match():
     ).fetchall()
 
     for b in bets:
-    user = db.execute("SELECT * FROM users WHERE id=?", (b["user_id"],)).fetchone()
+    user = db.execute(
+        "SELECT * FROM users WHERE id=?", (b["user_id"],)
+    ).fetchone()
 
-    # None 방지
-    double_profit = user["double_profit"] or 0
-    risk_cancel = user["risk_cancel"] or 0
-
+    # 기본 배당
     base_payout = b["amount"] * 2
 
-    # 2배이득권 → 3배
-    if double_profit > 0:
+    # 2배 이득권
+    if user["double_profit"] > 0:
         base_payout = b["amount"] * 3
-        db.execute("UPDATE users SET double_profit = double_profit - 1 WHERE id=?", (user["id"],))
+        db.execute(
+            "UPDATE users SET double_profit = double_profit - 1 WHERE id=?",
+            (user["id"],)
+        )
 
+    # 결과에 따라 지급
     if b["pick"] == winner:
-        db.execute("UPDATE users SET money = money + ? WHERE id=?", (base_payout, b["user_id"]))
-        db.execute("UPDATE bets SET result='win', payout=? WHERE id=?", (base_payout, b["id"]))
+        db.execute(
+            "UPDATE users SET money = money + ? WHERE id=?",
+            (base_payout, user["id"])
+        )
+        db.execute(
+            "UPDATE bets SET result='win', payout=? WHERE id=?",
+            (base_payout, b["id"])
+        )
     else:
-        # 손실 최소화권 → 절반 환불
-        if risk_cancel > 0:
+        # 손실 최소화권
+        if user["risk_cancel"] > 0:
             refund = b["amount"] // 2
-            db.execute("UPDATE users SET money = money + ? WHERE id=?", (refund, b["user_id"]))
-            db.execute("UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?", (user["id"],))
+            db.execute(
+                "UPDATE users SET money = money + ? WHERE id=?",
+                (refund, user["id"])
+            )
+            db.execute(
+                "UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?",
+                (user["id"],)
+            )
 
-        db.execute("UPDATE bets SET result='lose' WHERE id=?", (b["id"],))
-
-
-    db.commit()
-    return redirect("/")
+        db.execute(
+            "UPDATE bets SET result='lose' WHERE id=?",
+            (b["id"],)
+        )
 
 
 # ============================
