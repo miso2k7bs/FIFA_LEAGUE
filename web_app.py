@@ -1,3 +1,6 @@
+from db import get_db
+import sqlite3
+
 from flask import Flask, render_template_string, request, redirect, url_for, send_file, session
 from league_core import (
     elo, update_elo_with_score, get_ranking,
@@ -90,6 +93,18 @@ HTML_MAIN = """
 </head>
 
 <body>
+{% if session.username %}
+<p style="text-align:right; font-size:14px;">
+  👤 {{session.username}} | 💰 {{session.money | int}} 원
+  <a href="/logout" style="color:#9b59ff; margin-left:10px;">로그아웃</a>
+</p>
+{% else %}
+<p style="text-align:right; font-size:14px;">
+  <a href="/login" style="color:#9b59ff;">로그인</a> /
+  <a href="/register" style="color:#9b59ff;">회원가입</a>
+</p>
+{% endif %}
+
   <h1>⚽ FIFA ELO 리그</h1>
 
   <div class="container">
@@ -121,6 +136,38 @@ HTML_MAIN = """
 
         <button type="submit">경기 기록</button>
       </form>
+
+{% if session.username %}
+<div class="card">
+  <h2>💰 베팅하기</h2>
+
+  <form method="post" action="/bet">
+    <select name="p1">
+      {% for name in players %}
+      <option value="{{name}}">{{name}}</option>
+      {% endfor %}
+    </select>
+
+    <select name="p2">
+      {% for name in players %}
+      <option value="{{name}}">{{name}}</option>
+      {% endfor %}
+    </select>
+
+    <br>
+
+    <select name="pick">
+      <option value="p1">왼쪽 선수 승</option>
+      <option value="p2">오른쪽 선수 승</option>
+    </select>
+
+    <input type="number" name="amount" placeholder="베팅 금액">
+
+    <br>
+    <button type="submit">베팅</button>
+  </form>
+</div>
+{% endif %}
 
       <!-- 🔥 승률 예측 박스 -->
       <div id="predict_box" style="margin-top:15px; font-size:14px; color:#aaa;">
@@ -218,6 +265,30 @@ def index():
         stats=s
     )
 
+@app.route("/bet_ratio/<p1>/<p2>")
+def bet_ratio(p1, p2):
+    db = get_db()
+    rows = db.execute(
+        "SELECT pick, SUM(amount) AS total FROM bets WHERE p1=? AND p2=? GROUP BY pick",
+        (p1, p2)
+    ).fetchall()
+
+    t1 = t2 = 0
+
+    for r in rows:
+        if r["pick"] == "p1":
+            t1 = r["total"]
+        else:
+            t2 = r["total"]
+
+    total = t1 + t2
+    if total == 0:
+        return {"p1": 50, "p2": 50}
+
+    return {
+        "p1": round(t1 / total * 100, 1),
+        "p2": round(t2 / total * 100, 1)
+    }
 
 # =======================
 # 경기 입력
@@ -231,6 +302,27 @@ def add_match():
 
     if p1 != p2:
         update_elo_with_score(p1, p2, g1, g2)
+# ===== 베팅 정산 =====
+db = get_db()
+winner = "p1" if g1 > g2 else "p2"
+
+bets = db.execute(
+    "SELECT * FROM bets WHERE p1=? AND p2=? AND result='pending'",
+    (p1, p2)
+).fetchall()
+
+for b in bets:
+    if b["pick"] == winner:
+        # 승리 → 배당 2배 (원하면 나중에 Elo 기반으로 바꿔줌)
+        payout = b["amount"] * 2
+        db.execute("UPDATE users SET money = money + ? WHERE id=?",
+                   (payout, b["user_id"]))
+        db.execute("UPDATE bets SET result='win', payout=? WHERE id=?",
+                   (payout, b["id"]))
+    else:
+        db.execute("UPDATE bets SET result='lose' WHERE id=?", (b["id"],))
+
+db.commit()
 
     return redirect(url_for("index"))
 
@@ -438,3 +530,175 @@ def graph_file(name):
 # =======================
 if __name__ == "__main__":
     app.run(debug=True)
+
+# ===============================
+# 회원가입
+# ===============================
+@app.route("/register", methods=["GET","POST"])
+def register():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        db = get_db()
+        try:
+            db.execute("INSERT INTO users(username, password) VALUES (?,?)",
+                       (username, password))
+            db.commit()
+            return redirect("/login")
+        except:
+            return "이미 존재하는 아이디입니다."
+
+    return render_template_string("""
+    <h1>회원가입</h1>
+    <form method="post">
+        <input name="username" placeholder="ID"><br>
+        <input name="password" placeholder="PW"><br>
+        <button>가입</button>
+    </form>
+    """)
+
+
+# ===============================
+# 로그인
+# ===============================
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        db = get_db()
+        row = db.execute("SELECT * FROM users WHERE username=? AND password=?",
+                         (username, password)).fetchone()
+
+        if row:
+            session["user_id"] = row["id"]
+            session["username"] = row["username"]
+            session["money"] = row["money"]
+            return redirect("/")
+        return "로그인 실패"
+
+    return render_template_string("""
+    <h1>로그인</h1>
+    <form method="post">
+        <input name="username" placeholder="ID"><br>
+        <input name="password" placeholder="PW"><br>
+        <button>로그인</button>
+    </form>
+    """)
+
+
+# ===============================
+# 로그아웃
+# ===============================
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+@app.route("/bet", methods=["POST"])
+def bet():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    user_id = session["user_id"]
+    p1 = request.form["p1"]
+    p2 = request.form["p2"]
+    pick = request.form["pick"]
+    amount = int(request.form["amount"])
+
+    db = get_db()
+    user_money = db.execute(
+        "SELECT money FROM users WHERE id=?", (user_id,)
+    ).fetchone()["money"]
+
+    if user_money < amount:
+        return "잔액 부족!"
+
+    db.execute("INSERT INTO bets(user_id, p1, p2, pick, amount) VALUES (?,?,?,?,?)",
+               (user_id, p1, p2, pick, amount))
+
+    db.execute("UPDATE users SET money = money - ? WHERE id=?", (amount, user_id))
+
+    db.commit()
+
+    return redirect("/")
+@app.route("/shop")
+def shop():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    return render_template_string("""
+    <h1>🏪 상점</h1>
+
+    <p>보유금액: {{session.money}}원</p>
+
+    <div>
+        <h3>🎁 럭키박스 - 1,000,000원</h3>
+        <form method="post" action="/buy/lucky">
+            <button>구매</button>
+        </form>
+    </div>
+
+    <div>
+        <h3>💎 VIP 칭호 - 5,000,000원</h3>
+        <form method="post" action="/buy/vip">
+            <button>구매</button>
+        </form>
+    </div>
+
+    <div>
+        <h3>🎨 닉네임 색상 변경 - 2,000,000원</h3>
+        <form method="post" action="/buy/color">
+            <input name="color" placeholder="#ff0000">
+            <button>구매</button>
+        </form>
+    </div>
+
+    <br>
+    <a href="/">← 메인으로</a>
+    """)
+@app.route("/buy/<item>", methods=["POST"])
+def buy(item):
+    if "user_id" not in session:
+        return redirect("/login")
+
+    user_id = session["user_id"]
+    db = get_db()
+    user = db.execute(
+        "SELECT * FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    money = user["money"]
+
+    # 아이템 가격 설정
+    price = {
+        "lucky": 1000000,
+        "vip": 5000000,
+        "color": 2000000
+    }.get(item, None)
+
+    if price is None:
+        return "없는 아이템입니다."
+
+    if money < price:
+        return "돈 부족!"
+
+    # 돈 차감
+    db.execute("UPDATE users SET money = money - ? WHERE id=?", (price, user_id))
+
+    # 아이템 효과 적용
+    if item == "lucky":
+        import random
+        gain = random.randint(0, 3000000)
+        db.execute("UPDATE users SET money = money + ? WHERE id=?", (gain, user_id))
+
+    elif item == "vip":
+        db.execute("UPDATE users SET is_admin = 1 WHERE id=?", (user_id,))
+
+    elif item == "color":
+        color = request.form.get("color")
+        db.execute("UPDATE users SET name_color=? WHERE id=?", (color, user_id))
+
+    db.commit()
+
+    return redirect("/shop")
