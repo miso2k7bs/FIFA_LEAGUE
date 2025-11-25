@@ -310,7 +310,7 @@ def add_match():
         if b["pick"] == winner:
             db.execute(
                 "UPDATE users SET money = money + ? WHERE id=?",
-                (payout, user["id"])
+                (payout, b["user_id"])
             )
             db.execute(
                 "UPDATE bets SET result='win', payout=? WHERE id=?",
@@ -321,11 +321,11 @@ def add_match():
                 refund = b["amount"] // 2
                 db.execute(
                     "UPDATE users SET money = money + ? WHERE id=?",
-                    (refund, user["id"])
+                    (refund, b["user_id"])
                 )
                 db.execute(
                     "UPDATE users SET risk_cancel = risk_cancel - 1 WHERE id=?",
-                    (user["id"],)
+                    (b["user_id"],)
                 )
             db.execute(
                 "UPDATE bets SET result='lose' WHERE id=?",
@@ -565,11 +565,13 @@ def edit_player(name):
         (session["user_id"],)
     ).fetchone()
 
+    # DB에서 기존 프로필 불러오기
     row = db.execute(
         "SELECT * FROM player_profiles WHERE name=?",
         (name,)
     ).fetchone()
 
+    # ===== POST: 수정 저장 =====
     if request.method == "POST":
         if ticket_row["profile_ticket"] <= 0:
             return "프로필 수정권이 없습니다!"
@@ -577,6 +579,7 @@ def edit_player(name):
         strength = request.form.get("strength", "")
         style = request.form.get("style", "")
 
+        # 새 레코드 or 업데이트
         if row is None:
             db.execute(
                 "INSERT INTO player_profiles(name, strength, style) VALUES (?,?,?)",
@@ -588,6 +591,7 @@ def edit_player(name):
                 (strength, style, name)
             )
 
+        # 티켓 1개 차감
         db.execute(
             "UPDATE users SET profile_ticket = profile_ticket - 1 WHERE id=?",
             (session["user_id"],)
@@ -596,6 +600,7 @@ def edit_player(name):
         db.commit()
         return redirect(url_for("player_profile", name=name))
 
+    # ===== GET: 수정 페이지 =====
     strength_default = row["strength"] if row else player_info[name]["strength"]
     style_default = row["style"] if row else player_info[name]["style"]
 
@@ -623,7 +628,6 @@ def edit_player(name):
     ticket_row=ticket_row,
     strength_default=strength_default,
     style_default=style_default)
-
 
 # ============================
 # Elo 그래프 PNG 제공
