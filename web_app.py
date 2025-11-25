@@ -179,7 +179,7 @@ function predictRate() {
 <tr>
 <td>{{i}}</td>
 <td><a href="/player/{{name}}" style="color:white;">{{name}}</a></td>
-<td>{{ r | round(0) }}</td>
+<td>{{ r|round|int }}</td>
 </tr>
 {% endfor %}
 </table>
