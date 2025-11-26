@@ -1,57 +1,25 @@
-from flask import (
-    Flask, render_template_string, request,
-    redirect, url_for, send_file, session
-)
-from io import BytesIO
-import matplotlib.pyplot as plt
-
+from flask import Flask, render_template_string, request, redirect, session, jsonify
 from league_core import (
-    elo,
-    elo_history,
-    match_log,
-    player_info,
-    update_elo_with_score,
-    get_ranking,
-    get_recent_matches,
-    get_simple_stats,
-    delete_last_match,
-    reset_all,
-    save_data
+    init_db,
+    get_rating,
+    get_all_ratings,
+    update_elo,
+    get_match_history,
+    get_player_history,
+    save_player_info,
+    load_player_info
 )
 
-
-from io import BytesIO
-import matplotlib.pyplot as plt
+import math
 
 app = Flask(__name__)
-app.secret_key = "admin-secret"
+app.secret_key = "super_secret_key_abc123"
 
-ADMIN_PASSWORD = "spiderman7413!"
+init_db()
 
-
-# ==========================================================
-# Elo 그래프
-# ==========================================================
-def generate_elo_graph(player_name):
-    times = [t for t, _ in elo_history[player_name]]
-    ratings = [r for _, r in elo_history[player_name]]
-
-    plt.figure(figsize=(8, 4))
-    plt.plot(times, ratings, marker='o')
-    plt.title(f"{player_name} Elo 변화")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-
-    img = BytesIO()
-    plt.savefig(img, format="png")
-    img.seek(0)
-    plt.close()
-    return img
-
-
-# ==========================================================
-# 메인 HTML (UI 강화)
-# ==========================================================
+# ------------------------------------------------------------
+# HTML 템플릿
+# ------------------------------------------------------------
 HTML_MAIN = """
 <!doctype html>
 <html>
@@ -67,7 +35,6 @@ body {
   padding: 20px;
   animation: fadeIn 0.5s ease-in-out;
 }
-
 @keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
 
 .card {
@@ -78,7 +45,6 @@ body {
   box-shadow: 0 0 20px rgba(155, 89, 255, 0.2);
   animation: fadeInUp 0.6s ease;
 }
-
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(25px); }
   to { opacity: 1; transform: translateY(0); }
@@ -125,6 +91,7 @@ a { color: #9b59ff; }
 
 <h1 style="text-align:center; color:#9b59ff; font-size:40px;">⚽ FIFA ELO 리그</h1>
 
+<!-- 관리자 경기 입력 -->
 <div class="card">
 {% if session.get("admin") %}
 <h2>📒 경기 입력 (관리자 전용)</h2>
@@ -142,16 +109,12 @@ a { color: #9b59ff; }
 
   <button>기록</button>
 </form>
-
-<br>
-<button onclick="location.href='/delete_last'" style="background:#ff5555;">마지막 경기 삭제</button>
-<button onclick="location.href='/reset_all'" style="background:#d9534f;">전체 초기화</button>
 {% else %}
 <p style="color:#bbb;">관리자만 경기 기록을 등록할 수 있습니다.</p>
 {% endif %}
 </div>
 
-
+<!-- 승률 예측 -->
 <div class="card">
 <h2>📊 승률 예측</h2>
 
@@ -185,22 +148,23 @@ function predictRate() {
 </script>
 </div>
 
-
+<!-- 순위 -->
 <div class="card">
 <h2>🏆 순위표</h2>
 <table>
-<tr><th>순위</th><th>이름</th><th>ELO</th></tr>
+<tr><th>순위</th><th>이름</th><th>ELO</th><th>프로필</th></tr>
 {% for i,(name,r) in ranking %}
 <tr>
 <td>{{i}}</td>
-<td><a href="/player/{{name}}" style="color:white;">{{name}}</a></td>
-<td>{{ r|round|int }}</td>
+<td>{{name}}</td>
+<td>{{r}}</td>
+<td><button onclick="location.href='/player/{{name}}'">보기</button></td>
 </tr>
 {% endfor %}
 </table>
 </div>
 
-
+<!-- 최근 경기 -->
 <div class="card">
 <h2>🕘 최근 경기</h2>
 <ul>
@@ -214,27 +178,39 @@ function predictRate() {
 </html>
 """
 
+# ------------------------------------------------------------
+# 라우트
+# ------------------------------------------------------------
 
-# ==========================================================
-# 메인 페이지
-# ==========================================================
 @app.route("/")
 def index():
-    ranking = list(enumerate(get_ranking(), start=1))
-    recent = get_recent_matches(20)
-    stats = get_simple_stats()
-    return render_template_string(
-        HTML_MAIN,
-        players=list(elo.keys()),
-        ranking=ranking,
-        recent=recent,
-        stats=stats
-    )
+    ratings = get_all_ratings()
+    ranking = []
+    idx = 1
+    for name, r in ratings.items():
+        ranking.append((idx, name, round(r)))
+        idx += 1
 
+    players = list(ratings.keys())
+    recent = get_match_history(20)
 
-# ==========================================================
-# 경기 등록 (관리자)
-# ==========================================================
+    return render_template_string(HTML_MAIN, players=players, ranking=ranking, recent=recent)
+
+@app.route("/predict/<p1>/<p2>")
+def predict(p1, p2):
+    r1 = get_rating(p1)
+    r2 = get_rating(p2)
+
+    e1 = 1 / (1 + 10 ** ((r2 - r1) / 400))
+    e2 = 1 - e1
+
+    return jsonify({
+        "p1": p1,
+        "p2": p2,
+        "win1": round(e1 * 100),
+        "win2": round(e2 * 100)
+    })
+
 @app.route("/add", methods=["POST"])
 def add_match():
     if not session.get("admin"):
@@ -245,164 +221,121 @@ def add_match():
     g1 = int(request.form["g1"])
     g2 = int(request.form["g2"])
 
-    if p1 == p2:
-        return redirect("/")
+    update_elo(p1, p2, g1, g2)
 
-    update_elo_with_score(p1, p2, g1, g2)
     return redirect("/")
 
+# ------------------------------------------------------------
+# 프로필 페이지
+# ------------------------------------------------------------
 
-@app.route("/delete_last")
-def admin_delete_last():
-    if not session.get("admin"):
-        return "권한 없음"
-    delete_last_match()
-    return redirect("/")
+PROFILE_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{player}} 프로필</title>
+<style>
+body {
+  background:#0A0A23;
+  color:white;
+  padding:20px;
+  font-family:'Pretendard';
+}
+.card {
+  background:#151537;
+  padding:20px;
+  border-radius:14px;
+  margin-top:20px;
+}
+button {
+  background:#9b59ff;
+  padding:10px 15px;
+  border:none;
+  border-radius:8px;
+  color:white;
+  cursor:pointer;
+}
+</style>
+</head>
+<body>
 
+<h1 style="color:#9b59ff;">{{player}} 프로필</h1>
 
-@app.route("/reset_all")
-def admin_reset():
-    if not session.get("admin"):
-        return "권한 없음"
-    reset_all()
-    return redirect("/")
+<div class="card">
+<p><b>현재 Elo:</b> {{elo}}</p>
+<p><b>강점:</b> {{strength}}</p>
+<p><b>단점:</b> {{weakness}}</p>
+<p><b>스타일:</b> {{style}}</p>
+</div>
 
+{% if session.get("admin") %}
+<div class="card">
+<h3>수정하기</h3>
+<form method="post">
+  강점:<br><input name="strength" value="{{strength}}"><br><br>
+  단점:<br><input name="weakness" value="{{weakness}}"><br><br>
+  스타일:<br><input name="style" value="{{style}}"><br><br>
+  <button>저장</button>
+</form>
+</div>
+{% endif %}
 
-# ==========================================================
-# 승률 API
-# ==========================================================
-@app.route("/predict/<p1>/<p2>")
-def predict(p1, p2):
-    R1 = elo[p1]
-    R2 = elo[p2]
+<br>
+<button onclick="location.href='/'">⬅ 돌아가기</button>
 
-    E1 = 1 / (1 + 10 ** ((R2 - R1) / 400))
-    E2 = 1 - E1
+</body>
+</html>
+"""
 
-    return {
-        "p1": p1,
-        "p2": p2,
-        "win1": round(E1 * 100, 1),
-        "win2": round(E2 * 100, 1)
-    }
+@app.route("/player/<player>", methods=["GET", "POST"])
+def player_profile(player):
+    if request.method == "POST":
+        if not session.get("admin"):
+            return "권한 없음"
 
+        strength = request.form["strength"]
+        weakness = request.form["weakness"]
+        style = request.form["style"]
+        save_player_info(player, strength, weakness, style)
 
-# ==========================================================
-# 선수 프로필
-# ==========================================================
-@app.route("/player/<name>")
-def player_profile(name):
+    info = load_player_info(player)
+    elo = round(get_rating(player))
 
-    games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
+    return render_template_string(
+        PROFILE_HTML,
+        player=player,
+        elo=elo,
+        strength=info.get("strength", ""),
+        weakness=info.get("weakness", ""),
+        style=info.get("style", "")
+    )
 
-    wins = draws = losses = 0
-    gf = ga = 0
-
-    for g in games:
-        if g["p1"] == name:
-            s1, s2 = g["score1"], g["score2"]
-        else:
-            s1, s2 = g["score2"], g["score1"]
-
-        gf += s1
-        ga += s2
-
-        if s1 > s2: wins += 1
-        elif s1 < s2: losses += 1
-        else: draws += 1
-
-    total = wins + draws + losses
-    winrate = round(wins / total * 100, 1) if total > 0 else 0
-
-    info = player_info[name]
-
-    return render_template_string("""
-    <h1 style="color:#9b59ff;">{{name}} 선수 프로필</h1>
-
-    <div class="card">
-        <p><b>강점:</b> {{info.strength}}</p>
-        <p><b>플레이 스타일:</b> {{info.style}}</p>
-    </div>
-
-    <div class="card">
-        <p>총 경기: {{total}}</p>
-        <p>승/무/패: {{wins}} / {{draws}} / {{losses}}</p>
-        <p>득점: {{gf}} | 실점: {{ga}}</p>
-        <p>승률: {{winrate}}%</p>
-    </div>
-
-    <div class="card">
-        <h3>Elo 그래프</h3>
-        <img src="/graph/{{name}}" width="600">
-    </div>
-
-    {% if session.get("admin") %}
-    <div class="card">
-        <h3>관리자 프로필 수정</h3>
-        <form method="post" action="/admin/edit/{{name}}">
-            <textarea name="strength" rows="3" cols="60">{{info.strength}}</textarea><br><br>
-            <textarea name="style" rows="3" cols="60">{{info.style}}</textarea><br><br>
-            <button>저장</button>
-        </form>
-    </div>
-    {% endif %}
-
-    <a href="/">← 메인으로</a>
-    """,
-    name=name, info=info,
-    total=total, wins=wins, draws=draws, losses=losses,
-    gf=gf, ga=ga, winrate=winrate)
-
-
-# ==========================================================
-# 프로필 수정 (관리자 전용)
-# ==========================================================
-@app.route("/admin/edit/<name>", methods=["POST"])
-def admin_edit_profile(name):
-    if not session.get("admin"):
-        return "권한 없음"
-
-    player_info[name]["strength"] = request.form["strength"]
-    player_info[name]["style"] = request.form["style"]
-    return redirect(f"/player/{name}")
-
-
-# ==========================================================
-# 그래프 이미지 제공
-# ==========================================================
-@app.route("/graph/<name>")
-def graph(name):
-    return send_file(generate_elo_graph(name), mimetype="image/png")
-
-
-# ==========================================================
+# ------------------------------------------------------------
 # 관리자 로그인
-# ==========================================================
+# ------------------------------------------------------------
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        if request.form["pw"] == ADMIN_PASSWORD:
+        if request.form["pw"] == "admin123":
             session["admin"] = True
             return redirect("/")
         return "비밀번호 오류"
 
     return """
-    <h2>관리자 로그인</h2>
-    <form method="post">
-      <input name="pw" type="password" placeholder="비밀번호">
+    <form method='post'>
+      <input type='password' name='pw' placeholder='관리자 비번'>
       <button>로그인</button>
     </form>
     """
-
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
 
-
-# ==========================================================
-# Run
-# ==========================================================
+# ------------------------------------------------------------
+# 시작
+# ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
