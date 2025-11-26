@@ -1,12 +1,16 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_file
 from league_core import (
+    elo,
+    elo_history,
+    match_log,
+    player_info,
     update_elo_with_score,
     get_ranking,
     get_recent_matches,
     get_simple_stats,
     delete_last_match,
     reset_all
-)
+)   
 
 from io import BytesIO
 import matplotlib.pyplot as plt
@@ -280,7 +284,6 @@ def predict(p1, p2):
 # ==========================================================
 @app.route("/player/<name>")
 def player_profile(name):
-    from league_core import match_log
 
     games = [g for g in match_log if g["p1"] == name or g["p2"] == name]
 
