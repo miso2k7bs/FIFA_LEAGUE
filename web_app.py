@@ -1,4 +1,10 @@
-from flask import Flask, render_template_string, request, redirect, url_for, session, send_file
+from flask import (
+    Flask, render_template_string, request,
+    redirect, url_for, send_file, session
+)
+from io import BytesIO
+import matplotlib.pyplot as plt
+
 from league_core import (
     elo,
     elo_history,
@@ -9,8 +15,10 @@ from league_core import (
     get_recent_matches,
     get_simple_stats,
     delete_last_match,
-    reset_all
-)   
+    reset_all,
+    save_data
+)
+
 
 from io import BytesIO
 import matplotlib.pyplot as plt
